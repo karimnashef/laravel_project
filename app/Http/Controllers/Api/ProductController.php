@@ -6,18 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 
 class ProductController extends Controller
 {
+    use AuthorizesRequests;
     public function index(): JsonResponse
     {
         $products = Product::all();
-        return response()->json($products);
-    }
-
-    public function showByCategory(string $category_id): JsonResponse
-    {
-        $products = Product::where('category_id', $category_id)->get();
         return response()->json($products);
     }
 
@@ -53,6 +49,8 @@ class ProductController extends Controller
             'active' => 'boolean',
         ]);
 
+        $this->authorize('update' , $product);
+
         $product->update($data);
         return response()->json($product);
     }
@@ -60,6 +58,7 @@ class ProductController extends Controller
     public function softDelete(string $product_id): JsonResponse
     {
         $product = Product::findOrFail($product_id);
+        $this->authorize('delete', $product);
         $product->delete();
         return response()->json(['message' => 'Product soft-deleted']);
     }
@@ -67,6 +66,7 @@ class ProductController extends Controller
     public function restore(string $product_id): JsonResponse
     {
         $product = Product::withTrashed()->findOrFail($product_id);
+        $this->authorize('restore', $product);
         $product->restore();
         return response()->json(['message' => 'Product restored']);
     }
@@ -74,6 +74,7 @@ class ProductController extends Controller
     public function destroy(string $product_id): JsonResponse
     {
         $product = Product::withTrashed()->findOrFail($product_id);
+        $this->authorize('forceDelete', $product);
         $product->forceDelete();
         return response()->json(['message' => 'Product permanently deleted']);
     }

@@ -12,6 +12,25 @@ use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
 {
+
+    public function createToken(User $user)
+    {
+        $token = $user->createToken('auth_token')->plainTextToken;
+        $user->currentAccessToken()->expires_at = now()->addMinutes(5);
+        $user->currentAccessToken()->save();
+
+        return $token;
+    }
+
+    public function index()
+    {
+        $user = Auth:user();
+
+        return response()->json([
+            'status' => true,
+            'user' => $user
+        ]);
+    }
     public function register(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -26,7 +45,7 @@ class AuthController extends Controller
             'password' => $data['password'],
         ]);
 
-        $token = $user->createToken('api-token')->plainTextToken;
+        $token = $this->createToken($user);
 
         return response()->json(['user' => $user, 'token' => $token], 201);
     }

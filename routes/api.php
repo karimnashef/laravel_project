@@ -17,12 +17,21 @@ Route::prefix('v1')->group(function() {
 
     Route::middleware('auth:sanctum')->group(function() {
 
+        Route::prefix('user')->group(function() {
+            Route::prefix('profile')->group(function() {
+                Route::get('/' , [AuthController::class , 'index']);
+                Route::put('/update' , [AuthController::class , 'update']);
+                Route::delete('/delete' , [AuthController::class , 'delete']);
+                Route::post('/logout' , [AuthController::class , 'logout']);
+            });
+        });
+
         Route::prefix('products')->group(function() {
             Route::get('/', [ProductController::class, 'index']);
             Route::get('/{product}', [ProductController::class, 'show']);
             Route::post('/', [ProductController::class, 'store']);
             Route::put('/{product}', [ProductController::class, 'update']);
-            Route::delete('/{product}', [ProductController::class, 'destroy']);
+            Route::delete('/{product}', [ProductController::class, 'softDelete']);
         });
 
         Route::prefix('categories')->group(function() {
