@@ -21,5 +21,9 @@ class DatabaseSeeder extends Seeder
             'name' => 'Test User',
             'email' => 'test@example.com',
         ]);
+
+        \App\Models\Category::factory()->count(5)->create()->each(function ($cat) {
+            \App\Models\Product::factory()->count(6)->create(['category_id' => $cat->id]);
+        });
     }
 }
