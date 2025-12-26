@@ -14,8 +14,7 @@ class ProductFactory extends Factory
     {
         return [
             'category_id' => Category::factory(),
-            'sku' => strtoupper($this->faker->bothify('SKU-####')),
-            'name' => $this->faker->words(3, true),
+            'name' => $this->faker->unique()->words(3, true),
             'description' => $this->faker->paragraph(),
             'price' => $this->faker->randomFloat(2, 1, 200),
             'stock' => $this->faker->numberBetween(0, 100),

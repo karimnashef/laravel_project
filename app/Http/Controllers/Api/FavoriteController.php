@@ -19,10 +19,6 @@ class FavoriteController extends Controller
 
     public function toggle(Request $request, String $product_id): JsonResponse
     {
-        $data = $request->validate([
-            'product_id' => 'required|exists:products,id',
-        ]);
-
         $user = $request->user();
         $exists = Favorite::where('user_id', $user->id)->where('product_id', $data['product_id'])->first();
 

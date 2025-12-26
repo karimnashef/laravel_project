@@ -9,27 +9,15 @@ use Illuminate\Http\JsonResponse;
 
 class ProductController extends Controller
 {
-    public function __construct()
+    public function index(): JsonResponse
     {
-        $this->middleware('auth:sanctum')->only(['store','update','destroy']);
+        $products = Product::all();
+        return response()->json($products);
     }
 
-    public function index(Request $request): JsonResponse
+    public function showByCategory(string $category_id): JsonResponse
     {
-        $query = Product::query()->where('active', true);
-
-        if ($request->filled('q')) {
-            $q = $request->input('q');
-            $query->where(function ($q2) use ($q) {
-                $q2->where('name', 'like', "%{$q}%")
-                    ->orWhere('description', 'like', "%{$q}%")
-                    ->orWhere('sku', 'like', "%{$q}%");
-            });
-        }
-
-        $perPage = (int) $request->input('per_page', 15);
-        $products = $query->with('category')->paginate($perPage);
-
+        $products = Product::where('category_id', $category_id)->get();
         return response()->json($products);
     }
 
@@ -41,25 +29,23 @@ class ProductController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'name' => 'required|string|max:255',
-            'sku' => 'nullable|string|max:64|unique:products,sku',
+            'name' => 'required|string|max:255|unique:products,name',
             'description' => 'nullable|string',
             'price' => 'required|numeric|min:0',
             'stock' => 'nullable|integer|min:0',
             'category_id' => 'nullable|exists:categories,id',
+            'user_id' => 'nullable|exists:users,id',
             'active' => 'boolean',
         ]);
 
         $product = Product::create($data);
-
         return response()->json($product, 201);
     }
 
     public function update(Request $request, Product $product): JsonResponse
     {
         $data = $request->validate([
-            'name' => 'sometimes|required|string|max:255',
-            'sku' => "sometimes|nullable|string|max:64|unique:products,sku,{$product->id}",
+            'name' => 'required|string|max:255|unique:products,name,' . $product->id,
             'description' => 'nullable|string',
             'price' => 'sometimes|required|numeric|min:0',
             'stock' => 'nullable|integer|min:0',
@@ -68,13 +54,33 @@ class ProductController extends Controller
         ]);
 
         $product->update($data);
-
         return response()->json($product);
     }
 
-    public function destroy(Product $product): JsonResponse
+    public function softDelete(string $product_id): JsonResponse
     {
+        $product = Product::findOrFail($product_id);
         $product->delete();
-        return response()->json(['message' => 'Deleted']);
+        return response()->json(['message' => 'Product soft-deleted']);
+    }
+
+    public function restore(string $product_id): JsonResponse
+    {
+        $product = Product::withTrashed()->findOrFail($product_id);
+        $product->restore();
+        return response()->json(['message' => 'Product restored']);
+    }
+
+    public function destroy(string $product_id): JsonResponse
+    {
+        $product = Product::withTrashed()->findOrFail($product_id);
+        $product->forceDelete();
+        return response()->json(['message' => 'Product permanently deleted']);
+    }
+
+    public function trashed(): JsonResponse
+    {
+        $products = Product::onlyTrashed()->get();
+        return response()->json($products);
     }
 }
