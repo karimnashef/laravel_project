@@ -4,6 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Http\Requests\StoreProductRequest;
+use App\Http\Requests\UpdateProductRequest;
+use App\Http\Resources\ProductResource;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -11,48 +14,32 @@ use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 class ProductController extends Controller
 {
     use AuthorizesRequests;
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $products = Product::all();
-        return response()->json($products);
+        $products = Product::query()->with('category')->paginate($request->input('per_page', 15));
+        return ProductResource::collection($products)->response();
     }
 
     public function show(Product $product): JsonResponse
     {
-        return response()->json($product->load('category'));
+        return (new ProductResource($product->load('category')))->response();
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StoreProductRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'name' => 'required|string|max:255|unique:products,name',
-            'description' => 'nullable|string',
-            'price' => 'required|numeric|min:0',
-            'stock' => 'nullable|integer|min:0',
-            'category_id' => 'nullable|exists:categories,id',
-            'user_id' => 'nullable|exists:users,id',
-            'active' => 'boolean',
-        ]);
+        $data = $request->validated();
+        $data['user_id'] = $request->user()?->id;
 
         $product = Product::create($data);
-        return response()->json($product, 201);
+        return (new ProductResource($product->load('category')))->response()->setStatusCode(201);
     }
 
-    public function update(Request $request, Product $product): JsonResponse
+    public function update(UpdateProductRequest $request, Product $product): JsonResponse
     {
-        $data = $request->validate([
-            'name' => 'required|string|max:255|unique:products,name,' . $product->id,
-            'description' => 'nullable|string',
-            'price' => 'sometimes|required|numeric|min:0',
-            'stock' => 'nullable|integer|min:0',
-            'category_id' => 'nullable|exists:categories,id',
-            'active' => 'boolean',
-        ]);
-
-        $this->authorize('update' , $product);
+        $data = $request->validated();
 
         $product->update($data);
-        return response()->json($product);
+        return (new ProductResource($product->load('category')))->response();
     }
 
     public function softDelete(string $product_id): JsonResponse
@@ -79,9 +66,9 @@ class ProductController extends Controller
         return response()->json(['message' => 'Product permanently deleted']);
     }
 
-    public function trashed(): JsonResponse
+    public function trashed(Request $request): JsonResponse
     {
-        $products = Product::onlyTrashed()->get();
-        return response()->json($products);
+        $products = Product::onlyTrashed()->with('category')->paginate($request->input('per_page', 15));
+        return ProductResource::collection($products)->response();
     }
 }

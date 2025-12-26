@@ -7,6 +7,7 @@ use App\Models\Favorite;
 use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Auth;
 
 class FavoriteController extends Controller
 {
@@ -14,20 +15,20 @@ class FavoriteController extends Controller
     {
         $user = Auth::user();
         $favorites = $user->favorites()->with('product')->get();
-        return response()->json('favorites' => $favorites);
+        return response()->json(['favorites' => $favorites]);
     }
 
-    public function toggle(Request $request, String $product_id): JsonResponse
+    public function toggle(Request $request, string $product_id): JsonResponse
     {
         $user = $request->user();
-        $exists = Favorite::where('user_id', $user->id)->where('product_id', $data['product_id'])->first();
+        $exists = Favorite::where('user_id', $user->id)->where('product_id', $product_id)->first();
 
         if ($exists) {
             $exists->delete();
             return response()->json(['message' => 'Removed']);
         }
 
-        $fav = Favorite::create(['user_id' => $user->id, 'product_id' => $data['product_id']]);
+        $fav = Favorite::create(['user_id' => $user->id, 'product_id' => $product_id]);
         return response()->json($fav, 201);
     }
 }

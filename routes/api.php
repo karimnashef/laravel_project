@@ -12,8 +12,12 @@ use App\Http\Controllers\Api\CategoryController;
 
 Route::prefix('v1')->group(function() {
 
-    Route::post('register', [AuthController::class, 'register']);
+    // Public auth
+    Route::post('register', [AuthController::class, 'store']);
     Route::post('login', [AuthController::class, 'login']);
+    Route::post('auth/refresh', [AuthController::class, 'refreshToken']);
+    Route::post('auth/reset-account', [AuthController::class, 'resetAccount']);
+    Route::post('auth/reset-password', [AuthController::class, 'resetPassword']);
 
     Route::middleware('auth:sanctum')->group(function() {
 
@@ -21,8 +25,10 @@ Route::prefix('v1')->group(function() {
             Route::prefix('profile')->group(function() {
                 Route::get('/' , [AuthController::class , 'index']);
                 Route::put('/update' , [AuthController::class , 'update']);
-                Route::delete('/delete' , [AuthController::class , 'delete']);
+                Route::post('/soft-delete' , [AuthController::class , 'softDelete']);
                 Route::post('/logout' , [AuthController::class , 'logout']);
+                Route::post('/switch/{id}' , [AuthController::class , 'switchAccount']);
+                Route::delete('/delete' , [AuthController::class , 'hardDelete']);
             });
         });
 
@@ -32,6 +38,8 @@ Route::prefix('v1')->group(function() {
             Route::post('/', [ProductController::class, 'store']);
             Route::put('/{product}', [ProductController::class, 'update']);
             Route::delete('/{product}', [ProductController::class, 'softDelete']);
+            Route::post('/{product}/restore', [ProductController::class, 'restore']);
+            Route::delete('/{product}/force', [ProductController::class, 'destroy']);
         });
 
         Route::prefix('categories')->group(function() {
@@ -49,6 +57,12 @@ Route::prefix('v1')->group(function() {
         Route::prefix('favorites')->group(function() {
             Route::get('/', [FavoriteController::class, 'index']);
             Route::post('/toggle/{product_id}', [FavoriteController::class, 'toggle']);
+        });
+
+        // Admin user actions
+        Route::prefix('admin')->group(function () {
+            Route::post('users/{id}/block', [AuthController::class, 'blockUser']);
+            Route::post('users/{id}/unblock', [AuthController::class, 'unblockUser']);
         });
     });
 
