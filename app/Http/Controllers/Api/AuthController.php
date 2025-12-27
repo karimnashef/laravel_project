@@ -23,8 +23,11 @@ class AuthController extends Controller
 {
     private function createToken(User $user): string
     {
-        // return plain text token (Sanctum)
-        return $user->createToken('auth_token')->plainTextToken;
+        $token = $user->createToken('auth_token')->plainTextToken;
+        $user->currentAccessToken()->expires_at = now()->addMinutes(5);
+        $user->currentAccessToken()->save();
+
+        return $token;
     }
 
     private function createRefreshToken(User $user)
@@ -57,6 +60,7 @@ class AuthController extends Controller
         $user = User::find($data['userId']);
         if (!$user) return response()->json(['status'=>false,'msg'=>'User not found'], 404);
 
+        $user->tokens()->delete();
         $accessToken = $this->createToken($user);
 
         Redis::del("refresh_token:{$data['userId']}:{$data['tokenId']}");
@@ -74,7 +78,7 @@ class AuthController extends Controller
     {
         do {
             $key = bin2hex(random_bytes(8));
-        } while (User::where('key', $key)->exists());
+        } while (User::where('verify_key', $key)->exists());
         return $key;
     }
 
@@ -100,7 +104,7 @@ class AuthController extends Controller
     {
         $data = $request->validated();
 
-        $identifier = $request->filled('email') ? $request->email : $request->name;
+        $identifier = $request->filled('email') ? $request->email : $request->n ame;
         $throttle = $this->throttleKey($request, $identifier);
         if ($throttle) return $throttle;
 
@@ -145,7 +149,7 @@ class AuthController extends Controller
         $data['role'] = 'pending';
 
         $user = User::create($data);
-        $user->key = Hash::make($this->generateKey());
+        $user->verify_key = Hash::make($this->generateKey());
         $user->save();
 
         $token = $this->createToken($user);
@@ -157,13 +161,15 @@ class AuthController extends Controller
     public function update(UpdateProfileRequest $request)
     {
         $user = Auth::user();
+        $this->authorize('update', $user);
+
         $data = $request->validated();
 
-        if (!Hash::check($data['key'], $user->key)) return response()->json(['status'=>false,'msg'=>'invalid key'],401);
+        if (!Hash::check($data['verify_key'], $user->verify_key)) return response()->json(['status'=>false,'msg'=>'invalid key'],401);
         if (!empty($data['password']) && Hash::check($data['password'],$user->password)) return response()->json(['status'=>false,'msg'=>'this password is old'],401);
 
         if (!empty($data['password'])) $data['password'] = Hash::make($data['password']);
-        $data['key'] = Hash::make($this->generateKey());
+        $data['verify_key'] = Hash::make($this->generateKey());
 
         $user->update($data);
         return response()->json(['status'=>true,'msg'=>'updated','data'=> new UserResource($user)],200);
@@ -172,28 +178,31 @@ class AuthController extends Controller
     public function switchAccount(string $id)
     {
         $user = Auth::user();
-        $user->currentAccessToken()->delete();
         $account = User::where('name',$user->name)->where('id',$id)->firstOrFail();
+        $this->authorize('switch', $account);
+        $user->currentAccessToken()?->delete();
         $account->tokens()->delete();
         $token = $this->createToken($account);
-        return response()->json(['status'=>true,'msg'=>'switched','token'=>$token],200);
+        return response()->json(['status'=>true,'msg'=>'switched','access_token'=>$token],200);
     }
 
     public function softDelete(Request $request)
     {
-        $user = User::query()
+        $target = User::query()
             ->when($request->email ?? null, fn($q,$email)=>$q->where('email',$email))
             ->when($request->phone ?? null, fn($q,$phone)=>$q->where('phone',$phone))
             ->first();
 
-        if (!$user) return response()->json(['status'=>false,'msg'=>'no account found'],404);
+        if (!$target) return response()->json(['status'=>false,'msg'=>'no account found'],404);
 
-        $user->status='deleted';
-        $user->verify_key=null;
-        $user->tokens()->delete();
-        $user->save();
+        $this->authorize('delete', $target);
 
-        $user->delete();
+        $target->status='deleted';
+        $target->verify_key=null;
+        $target->tokens()->delete();
+        $target->save();
+
+        $target->delete();
 
         return response()->json(['status'=>true,'msg'=>'deleted'],200);
     }
@@ -202,9 +211,10 @@ class AuthController extends Controller
     {
         $data = $request->validated();
 
-        $user = User::where('email',$data['userId'])->first();
+        $user = User::where('email',$data['userId']-)->first();
         if (!$user || $user->status!=='deleted') return response()->json(['status'=>false,'msg'=>'No soft-deleted account found'],404);
         $user->status='active';
+        $user->verify_key = Hash::make($this->generateKey());
         $user->save();
         $token = $this->createToken($user);
         $refreshToken = $this->createRefreshToken($user);
@@ -216,8 +226,10 @@ class AuthController extends Controller
     public function hardDelete()
     {
         $user = Auth::user();
+        $this->authorize('forceDelete', $user);
+
         $user->tokens()->delete();
-        $user->delete();
+        $user->forceDelete();
         return response()->json(['status'=>true,'msg'=>'account permanently deleted'],200);
     }
 
@@ -227,9 +239,10 @@ class AuthController extends Controller
 
         $user = User::where('email',$data['email'])->first();
         if (!$user) return response()->json(['status'=>false,'msg'=>'no account found'],404);
-        if (!Hash::check($data['key'],$user->key)) return response()->json(['status'=>false,'msg'=>'invalid key'],401);
+        if (!Hash::check($data['verify_key'],$user->verify_key)) return response()->json(['status'=>false,'msg'=>'invalid key'],401);
 
         $user->password = Hash::make($data['new_password']);
+        $user->verify_key = Hash::make($this->generateKey());
         $user->save();
 
         return response()->json(['status'=>true,'msg'=>'password reset successfully'],200);
@@ -256,7 +269,12 @@ class AuthController extends Controller
         $user->status='active';
         $user->save();
 
-        return response()->json(['status'=>true,'msg'=>'user unblocked'],200);
+        $token = $this->createToken($user);
+
+        Redis::del("refresh_token:{$data['userId']}:{$data['tokenId']}");
+        $refreshToken = $this->createRefreshToken($user);
+
+        return response()->json(['status'=>true,'msg'=>'user unblocked' , 'token' => $token , 'refresh_token' => $refreshToken],200);
     }
 }
 
