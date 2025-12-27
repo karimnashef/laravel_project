@@ -5,9 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Validation\Rule;
 use App\Models\User;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
@@ -26,19 +24,17 @@ class AuthController extends Controller
         $token = $user->createToken('auth_token')->plainTextToken;
         $user->currentAccessToken()->expires_at = now()->addMinutes(5);
         $user->currentAccessToken()->save();
-
         return $token;
     }
 
     private function createRefreshToken(User $user)
     {
         $plain = bin2hex(random_bytes(64));
-
         $hashed = hash('sha256', $plain);
-
         $tokenId = Str::uuid()->toString();
 
-        Redis::setex("refresh_token:{$user->id}:{$tokenId}",
+        Redis::setex(
+            "refresh_token:{$user->id}:{$tokenId}",
             60 * 60 * 24 * 30,
             $hashed
         );
@@ -49,16 +45,17 @@ class AuthController extends Controller
         ];
     }
 
-    public function refreshToken(RefreshTokenRequest $request){
+    public function refreshToken(RefreshTokenRequest $request)
+    {
         $data = $request->validated();
 
         $hashed = Redis::get("refresh_token:{$data['userId']}:{$data['tokenId']}");
         if (!$hashed || !hash_equals($hashed, hash('sha256', $data['refreshToken']))) {
-            return response()->json(['status'=>false,'msg'=>'Invalid refresh token'], 401);
+            return response()->json(['status'=>false,'msg'=>'Invalid refresh token'],401);
         }
 
         $user = User::find($data['userId']);
-        if (!$user) return response()->json(['status'=>false,'msg'=>'User not found'], 404);
+        if (!$user) return response()->json(['status'=>false,'msg'=>'User not found'],404);
 
         $user->tokens()->delete();
         $accessToken = $this->createToken($user);
@@ -67,36 +64,36 @@ class AuthController extends Controller
         $newRefreshToken = $this->createRefreshToken($user);
 
         return response()->json([
-            'status' => true,
-            'access_token' => $accessToken,
-            'refresh_token' => $newRefreshToken,
-            'data' => new UserResource($user)
-        ], 200);
+            'status'=>true,
+            'access_token'=>$accessToken,
+            'refresh_token'=>$newRefreshToken,
+            'data'=>new UserResource($user)
+        ],200);
     }
 
     private function generateKey()
     {
         do {
             $key = bin2hex(random_bytes(8));
-        } while (User::where('verify_key', $key)->exists());
+        } while (User::where('verify_key',$key)->exists());
         return $key;
     }
 
-    private function throttleKey(Request $request, string $identifier)
+    private function throttleKey(Request $request,string $identifier)
     {
         $key = Str::lower($identifier).'|'.$request->ip();
-        if (RateLimiter::tooManyAttempts($key, 5)) {
+        if (RateLimiter::tooManyAttempts($key,5)) {
             $seconds = RateLimiter::availableIn($key);
-            return response()->json(['status' => false, 'msg' => "Too many attempts. Try again in {$seconds} seconds."], 429);
+            return response()->json(['status'=>false,'msg'=>"Too many attempts. Try again in {$seconds} seconds."],429);
         }
-        RateLimiter::hit($key, 60);
+        RateLimiter::hit($key,60);
         return null;
     }
 
     public function index()
     {
         $user = Auth::user();
-        if (!$user) return response()->json(['status' => false, 'msg' => 'Unauthenticated.'], 401);
+        if (!$user) return response()->json(['status'=>false,'msg'=>'Unauthenticated'],401);
         return (new UserResource($user))->response();
     }
 
@@ -104,38 +101,44 @@ class AuthController extends Controller
     {
         $data = $request->validated();
 
-        $identifier = $request->filled('email') ? $request->email : $request->n ame;
-        $throttle = $this->throttleKey($request, $identifier);
+        $identifier = $request->filled('email') ? $request->email : $request->name;
+        $throttle = $this->throttleKey($request,$identifier);
         if ($throttle) return $throttle;
 
-        $credentials = [];
-        if ($request->filled('name')) $credentials = $request->only('name','password');
-        if ($request->filled('email')) $credentials = $request->only('email','password');
+        $credentials = $request->filled('email')
+            ? $request->only('email','password')
+            : $request->only('name','password');
 
         if (!Auth::attempt($credentials)) {
             return response()->json(['status'=>false,'msg'=>'Invalid Credentials'],401);
         }
 
         $user = Auth::user();
-        if ($user->status==='deleted') {
+
+        if ($user->status === 'deleted') {
             $user->tokens()->delete();
             return response()->json(['status'=>false,'msg'=>'Your account is deleted'],403);
-        } elseif ($user->status==='blocked') {
-            $user->tokens()->delete();
-            Auth::logout();
-            return response()->json(['status'=>false,'msg'=>'Your account is blocked. Contact support.'],403);
         }
 
-        $token = $this->createToken($user);
-        $refreshToken = $this->createRefreshToken($user);
+        if ($user->status === 'blocked') {
+            $user->tokens()->delete();
+            Auth::logout();
+            return response()->json(['status'=>false,'msg'=>'Your account is blocked'],403);
+        }
 
-        return response()->json(['status'=>true,'access_token' => $token , 'refresh_token' => $refreshToken,'data'=> new UserResource($user)],200);
+        return response()->json([
+            'status'=>true,
+            'access_token'=>$this->createToken($user),
+            'refresh_token'=>$this->createRefreshToken($user),
+            'data'=>new UserResource($user)
+        ],200);
     }
 
     public function logout(Request $request)
     {
         $user = $request->user();
-        if (! $user) return response()->json(['status' => false, 'msg' => 'Unauthenticated.'], 401);
+        if (!$user) return response()->json(['status'=>false,'msg'=>'Unauthenticated'],401);
+
         $user->currentAccessToken()?->delete();
         Redis::del("refresh_token:{$user->id}:{$request->tokenId}");
 
@@ -152,56 +155,71 @@ class AuthController extends Controller
         $user->verify_key = Hash::make($this->generateKey());
         $user->save();
 
-        $token = $this->createToken($user);
-        $refreshToken = $this->createRefreshToken($user);
-
-        return response()->json(['status'=>true,'msg'=>'created','data'=> new UserResource($user) ,'access_token'=>$token , 'refresh_token' => $refreshToken],201);
+        return response()->json([
+            'status'=>true,
+            'msg'=>'created',
+            'data'=>new UserResource($user),
+            'access_token'=>$this->createToken($user),
+            'refresh_token'=>$this->createRefreshToken($user)
+        ],201);
     }
 
     public function update(UpdateProfileRequest $request)
     {
         $user = Auth::user();
-        $this->authorize('update', $user);
+        $this->authorize('update',$user);
 
         $data = $request->validated();
 
-        if (!Hash::check($data['verify_key'], $user->verify_key)) return response()->json(['status'=>false,'msg'=>'invalid key'],401);
-        if (!empty($data['password']) && Hash::check($data['password'],$user->password)) return response()->json(['status'=>false,'msg'=>'this password is old'],401);
+        if (!Hash::check($data['verify_key'],$user->verify_key)) {
+            return response()->json(['status'=>false,'msg'=>'invalid key'],401);
+        }
 
-        if (!empty($data['password'])) $data['password'] = Hash::make($data['password']);
+        if (!empty($data['password']) && Hash::check($data['password'],$user->password)) {
+            return response()->json(['status'=>false,'msg'=>'this password is old'],401);
+        }
+
+        if (!empty($data['password'])) {
+            $data['password'] = Hash::make($data['password']);
+        }
+
         $data['verify_key'] = Hash::make($this->generateKey());
-
         $user->update($data);
-        return response()->json(['status'=>true,'msg'=>'updated','data'=> new UserResource($user)],200);
+
+        return response()->json(['status'=>true,'msg'=>'updated','data'=>new UserResource($user)],200);
     }
 
     public function switchAccount(string $id)
     {
         $user = Auth::user();
         $account = User::where('name',$user->name)->where('id',$id)->firstOrFail();
-        $this->authorize('switch', $account);
+        $this->authorize('switch',$account);
+
         $user->currentAccessToken()?->delete();
         $account->tokens()->delete();
-        $token = $this->createToken($account);
-        return response()->json(['status'=>true,'msg'=>'switched','access_token'=>$token],200);
+
+        return response()->json([
+            'status'=>true,
+            'msg'=>'switched',
+            'access_token'=>$this->createToken($account)
+        ],200);
     }
 
     public function softDelete(Request $request)
     {
         $target = User::query()
-            ->when($request->email ?? null, fn($q,$email)=>$q->where('email',$email))
-            ->when($request->phone ?? null, fn($q,$phone)=>$q->where('phone',$phone))
+            ->when($request->email,fn($q,$email)=>$q->where('email',$email))
+            ->when($request->phone,fn($q,$phone)=>$q->where('phone',$phone))
             ->first();
 
         if (!$target) return response()->json(['status'=>false,'msg'=>'no account found'],404);
 
-        $this->authorize('delete', $target);
+        $this->authorize('delete',$target);
 
-        $target->status='deleted';
-        $target->verify_key=null;
+        $target->status = 'deleted';
+        $target->verify_key = null;
         $target->tokens()->delete();
         $target->save();
-
         $target->delete();
 
         return response()->json(['status'=>true,'msg'=>'deleted'],200);
@@ -211,25 +229,31 @@ class AuthController extends Controller
     {
         $data = $request->validated();
 
-        $user = User::where('email',$data['userId']-)->first();
-        if (!$user || $user->status!=='deleted') return response()->json(['status'=>false,'msg'=>'No soft-deleted account found'],404);
-        $user->status='active';
+        $user = User::where('email',$data['email'])->first();
+        if (!$user || $user->status !== 'deleted') {
+            return response()->json(['status'=>false,'msg'=>'No soft-deleted account found'],404);
+        }
+
+        $user->status = 'active';
         $user->verify_key = Hash::make($this->generateKey());
         $user->save();
-        $token = $this->createToken($user);
-        $refreshToken = $this->createRefreshToken($user);
 
-        return response()->json(['status'=>true,'access_token' => $token , 'refresh_token' => $refreshToken,'data'=> new UserResource($user)],200);
-
+        return response()->json([
+            'status'=>true,
+            'access_token'=>$this->createToken($user),
+            'refresh_token'=>$this->createRefreshToken($user),
+            'data'=>new UserResource($user)
+        ],200);
     }
 
     public function hardDelete()
     {
         $user = Auth::user();
-        $this->authorize('forceDelete', $user);
+        $this->authorize('forceDelete',$user);
 
         $user->tokens()->delete();
         $user->forceDelete();
+
         return response()->json(['status'=>true,'msg'=>'account permanently deleted'],200);
     }
 
@@ -239,7 +263,10 @@ class AuthController extends Controller
 
         $user = User::where('email',$data['email'])->first();
         if (!$user) return response()->json(['status'=>false,'msg'=>'no account found'],404);
-        if (!Hash::check($data['verify_key'],$user->verify_key)) return response()->json(['status'=>false,'msg'=>'invalid key'],401);
+
+        if (!Hash::check($data['verify_key'],$user->verify_key)) {
+            return response()->json(['status'=>false,'msg'=>'invalid key'],401);
+        }
 
         $user->password = Hash::make($data['new_password']);
         $user->verify_key = Hash::make($this->generateKey());
@@ -251,32 +278,36 @@ class AuthController extends Controller
     public function blockUser(Request $request,string $id)
     {
         $admin = Auth::user();
-        if ($admin->role!=='admin') return response()->json(['status'=>false,'msg'=>'unauthorized'],403);
+        if ($admin->role !== 'admin') {
+            return response()->json(['status'=>false,'msg'=>'unauthorized'],403);
+        }
 
         $user = User::findOrFail($id);
-        $user->status='blocked';
+        $user->status = 'blocked';
         $user->tokens()->delete();
         $user->save();
 
         return response()->json(['status'=>true,'msg'=>'user blocked'],200);
     }
+
     public function unblockUser(Request $request,string $id)
     {
         $admin = Auth::user();
-        if ($admin->role!=='admin') return response()->json(['status'=>false,'msg'=>'unauthorized'],403);
+        if ($admin->role !== 'admin') {
+            return response()->json(['status'=>false,'msg'=>'unauthorized'],403);
+        }
 
         $user = User::findOrFail($id);
-        $user->status='active';
+        $user->status = 'active';
         $user->save();
 
-        $token = $this->createToken($user);
-
-        Redis::del("refresh_token:{$data['userId']}:{$data['tokenId']}");
-        $refreshToken = $this->createRefreshToken($user);
-
-        return response()->json(['status'=>true,'msg'=>'user unblocked' , 'token' => $token , 'refresh_token' => $refreshToken],200);
+        return response()->json([
+            'status'=>true,
+            'msg'=>'user unblocked',
+            'token'=>$this->createToken($user),
+            'refresh_token'=>$this->createRefreshToken($user)
+        ],200);
     }
 }
-
 
 ?>

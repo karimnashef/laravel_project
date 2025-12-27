@@ -28,7 +28,7 @@ class ProductController extends Controller
     public function store(StoreProductRequest $request): JsonResponse
     {
         $data = $request->validated();
-        $data['user_id'] = $request->user()?->id;
+        $data['user_id'] = Auth::user()->id;
 
         $product = Product::create($data);
         return (new ProductResource($product->load('category')))->response()->setStatusCode(201);
